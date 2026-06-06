@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ai-attendance-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: attendance
+      MYSQL_ALLOW_EMPTY_PASSWORD: "false"
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - mysql_data:/var/lib/mysql
+    networks:
+      - attendance-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai-attendance-backend
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: attendance
+      SERVER_PORT: 8080
+      FACE_SERVICE_URL: http://face-service:5000
+      JWT_SECRET: your-secret-key
+      SIMILARITY_THRESHOLD: 0.60
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - attendance-network
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    image: php:7.4-apache
+    container_name: ai-attendance-frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend/public:/var/www/html
+      - ./frontend/includes:/var/www/html/includes
+      - ./frontend/assets:/var/www/html/assets
+    networks:
+      - attendance-network
+    environment:
+      API_BASE_URL: http://localhost:8080/api
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  face-service:
+    build:
+      context: ./face-recognition-service
+      dockerfile: Dockerfile
+    container_name: ai-attendance-face-service
+    ports:
+      - "5000:5000"
+    networks:
+      - attendance-network
+    environment:
+      FLASK_ENV: production
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  attendance-network:
+    driver: bridge
